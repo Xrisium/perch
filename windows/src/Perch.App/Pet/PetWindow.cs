@@ -268,7 +268,7 @@ public sealed class PetWindow : Window
             if (previewUntil > DateTimeOffset.UtcNow && feedback != null)
                 label.Text = feedback;
             if (pose == 2 && previewUntil < DateTimeOffset.UtcNow)
-                label.Text = "Codex · " + sessions.Count(s => s.Status == "运行中") + " 个任务";
+                label.Text = sessions.Count(s => s.Status == "运行中") + " 个任务";
             if (pose == 4 && mediaKind == "unknown" && previewUntil < DateTimeOffset.UtcNow)
                 label.Text = "媒体播放中";
             capsule.Visibility = !store.Preferences.Quiet && (IsMouseOver || pose != 0) ? Visibility.Visible : Visibility.Collapsed;

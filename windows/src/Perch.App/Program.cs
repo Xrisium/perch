@@ -12,6 +12,12 @@ public static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        if (args.Length == 3 && args[0] == "--dsh-host")
+        {
+            try { Environment.ExitCode = DshHost.Run(args[1], args[2]); }
+            catch { Environment.ExitCode = 1; }
+            return;
+        }
         bool demo = args.Contains("--demo");
         string? Option(string key)
         {
@@ -34,12 +40,17 @@ public static class Program
         string? temp = demo ? Path.Combine(Path.GetTempPath(), "perch-demo-" + Guid.NewGuid().ToString("N")) : null;
         try
         {
-            var store = new Store(temp);
+            var store = new Store(temp ?? Option("--data-root"));
             if (demo)
                 store.Preferences.PetCharacter = Option("--theme") == "pox" ? "pox" : "native";
             using var theme = new ThemeManager(() => store.Preferences.PetEnabled && store.Preferences.PetCharacter == "pox", Option("--theme"));
             var panel = new Panel(store, theme, demo, args.Contains("--keep-open") || Option("--screenshot") != null, args.Contains("--inspect"));
             panel.Model.Page = Option("--page") ?? "accounts";
+            if (demo && Option("--client") == "dsh")
+            {
+                panel.Model.NewDsh = true;
+                panel.Model.DshMode = Option("--dsh-mode") switch { "source" => 0, "external" => 2, _ => 1 };
+            }
             using var tray = demo && !args.Contains("--tray-menu") ? null : new Tray(panel);
             var wait = demo ? null : ThreadPool.RegisterWaitForSingleObject(show, (_, _) => app.Dispatcher.BeginInvoke(panel.OpenPanel), null, -1, false);
             app.Exit += (_, _) =>
@@ -56,7 +67,7 @@ public static class Program
             {
                 var timer = new DispatcherTimer
                 {
-                    Interval = TimeSpan.FromMilliseconds(800)
+                    Interval = TimeSpan.FromMilliseconds(int.TryParse(Option("--screenshot-delay-ms"), out int captureDelay) ? Math.Clamp(captureDelay, 800, 60000) : 800)
                 };
                 timer.Tick += (_, _) =>
                 {

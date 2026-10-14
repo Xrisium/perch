@@ -1,10 +1,39 @@
-<!-- macOS: NewAccountView.swift -->
-<UserControl x:Class="Perch.Windows.NewAccountPage" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Perch.Windows" >
-<StackPanel>
- <UniformGrid Columns="2" Margin="0,0,0,16"><RadioButton Content="Codex" Style="{StaticResource SegmentedControl}" IsChecked="{Binding NewCodex}" GroupName="Client"/><RadioButton Content="Claude" Style="{StaticResource SegmentedControl}" IsChecked="{Binding NewClaude}" GroupName="Client"/></UniformGrid>
- <TextBox Text="{Binding NewName, UpdateSourceTrigger=PropertyChanged}" local:Hint.Text="{DynamicResource account.nameHint}" MaxLength="80" Margin="0,0,0,8"/>
- <TextBlock Text="{DynamicResource account.createHelp}" Style="{StaticResource Meta}" Margin="0,0,0,16"/>
- <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="取消" Command="{Binding CancelAdd}" Style="{StaticResource StandardButton}" Margin="0,0,8,0"/><Button Content="{DynamicResource account.create}" Command="{Binding Create}" Style="{StaticResource AccentButton}" IsDefault="{Binding IsAdd}"/></StackPanel>
- <Expander Header="高级：引用已有目录" Margin="0,16,0,0"><StackPanel Margin="0,8,0,0"><TextBlock Text="原地引用，不移动、不复制登录信息。" Style="{StaticResource Meta}" Margin="0,0,0,8"/><CheckBox Content="Claude 第三方模式（独立 AppData）" IsChecked="{Binding ThirdParty}" Margin="0,0,0,8"/><Button Content="选择目录并添加…" Command="{Binding Import}" Style="{StaticResource StandardButton}" HorizontalAlignment="Left"/></StackPanel></Expander>
+<UserControl x:Class="Perch.Windows.NewAccountPage" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Perch.Windows">
+ <StackPanel>
+  <UniformGrid Columns="3" Margin="0,0,0,16">
+   <RadioButton Content="Codex" Style="{StaticResource SegmentedControl}" IsChecked="{Binding NewCodex}" GroupName="Client"/>
+   <RadioButton Content="Claude" Style="{StaticResource SegmentedControl}" IsChecked="{Binding NewClaude}" GroupName="Client"/>
+   <RadioButton Content="dsh" Style="{StaticResource SegmentedControl}" IsChecked="{Binding NewDsh}" GroupName="Client"/>
+  </UniformGrid>
+  <TextBox Text="{Binding NewName, UpdateSourceTrigger=PropertyChanged}" local:Hint.Text="{DynamicResource account.nameHint}" MaxLength="80" Margin="0,0,0,8"/>
+  <TextBlock Text="{DynamicResource account.createHelp}" Style="{StaticResource Meta}" Margin="0,0,0,16" Visibility="{Binding NewNative, Converter={StaticResource BoolVisibility}}"/>
+  <StackPanel Visibility="{Binding NewDsh, Converter={StaticResource BoolVisibility}}">
+   <TextBlock Text="{DynamicResource dsh.help}" Style="{StaticResource Meta}" Margin="0,0,0,10"/>
+   <ComboBox SelectedIndex="{Binding DshMode}" Margin="0,0,0,10">
+    <ComboBoxItem Content="{DynamicResource dsh.source}"/><ComboBoxItem Content="{DynamicResource dsh.npm}"/><ComboBoxItem Content="{DynamicResource dsh.external}"/>
+   </ComboBox>
+   <StackPanel Visibility="{Binding DshManaged, Converter={StaticResource BoolVisibility}}">
+    <TextBlock Text="{Binding DshInstallHint}" Style="{StaticResource Meta}" Margin="0,0,0,4"/>
+    <DockPanel Margin="0,0,0,6"><Button DockPanel.Dock="Right" Content="…" Command="{Binding ChooseDshInstallation}" Style="{StaticResource StandardButton}" Margin="6,0,0,0" ToolTip="选择安装目录"/><TextBox Text="{Binding DshPath, UpdateSourceTrigger=PropertyChanged}"/></DockPanel>
+    <Button Content="{DynamicResource dsh.detect}" Command="{Binding DetectDsh}" Style="{StaticResource SubtleButton}" HorizontalAlignment="Left" Margin="0,0,0,10"/>
+    <TextBlock Text="{DynamicResource dsh.home}" Style="{StaticResource Meta}" Margin="0,0,0,4"/>
+    <DockPanel Margin="0,0,0,6"><Button DockPanel.Dock="Right" Content="…" Command="{Binding ChooseDshHome}" Style="{StaticResource StandardButton}" Margin="6,0,0,0" ToolTip="选择已有数据目录"/><TextBox Text="{Binding DshHome, UpdateSourceTrigger=PropertyChanged}" local:Hint.Text="{DynamicResource dsh.homeHint}"/></DockPanel>
+    <TextBlock Text="{DynamicResource dsh.homeHelp}" Style="{StaticResource Meta}" Margin="0,0,0,8"/>
+    <Expander Header="{DynamicResource dsh.advanced}" Margin="0,0,0,12"><StackPanel Margin="0,8,0,0">
+     <TextBlock Text="Node.js" Style="{StaticResource Meta}" Margin="0,0,0,4"/>
+     <DockPanel Margin="0,0,0,8"><Button DockPanel.Dock="Right" Content="…" Command="{Binding ChooseDshNode}" Style="{StaticResource StandardButton}" Margin="6,0,0,0"/><TextBox Text="{Binding DshNode, UpdateSourceTrigger=PropertyChanged}" local:Hint.Text="自动发现 node.exe"/></DockPanel>
+     <TextBlock Text="Web profile" Style="{StaticResource Meta}" Margin="0,0,0,4"/><TextBox Text="{Binding DshProfile, UpdateSourceTrigger=PropertyChanged}"/>
+    </StackPanel></Expander>
+   </StackPanel>
+   <StackPanel Visibility="{Binding DshExternal, Converter={StaticResource BoolVisibility}}" Margin="0,0,0,12">
+    <TextBlock Text="{DynamicResource dsh.urlHelp}" Style="{StaticResource Meta}" Margin="0,0,0,6"/>
+    <TextBox Text="{Binding DshUrl, UpdateSourceTrigger=PropertyChanged}" local:Hint.Text="http://127.0.0.1:3080/?token=…"/>
+    <TextBlock Text="{DynamicResource dsh.balanceHome}" Style="{StaticResource Meta}" Margin="0,10,0,4"/>
+    <DockPanel Margin="0,0,0,6"><Button DockPanel.Dock="Right" Content="…" Command="{Binding ChooseDshBalanceHome}" Style="{StaticResource StandardButton}" Margin="6,0,0,0" ToolTip="选择已有实例的数据目录"/><TextBox Text="{Binding DshBalanceHome, UpdateSourceTrigger=PropertyChanged}" local:Hint.Text="留空不读取 API Key"/></DockPanel>
+    <TextBlock Text="{DynamicResource dsh.balanceHomeHelp}" Style="{StaticResource Meta}"/>
+   </StackPanel>
+  </StackPanel>
+  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="取消" Command="{Binding CancelAdd}" Style="{StaticResource StandardButton}"/><Button Content="{Binding CreateLabel}" Command="{Binding Create}" Style="{StaticResource AccentButton}" IsDefault="{Binding IsAdd}" Margin="8,0,0,0"/></StackPanel>
+  <Expander Header="高级：引用已有目录" Margin="0,16,0,0" Visibility="{Binding NewNative, Converter={StaticResource BoolVisibility}}"><StackPanel Margin="0,8,0,0"><TextBlock Text="原地引用，不移动、不复制登录信息。" Style="{StaticResource Meta}" Margin="0,0,0,8"/><CheckBox Content="Claude 第三方模式（独立 AppData）" IsChecked="{Binding ThirdParty}" Margin="0,0,0,8"/><Button Content="选择目录并添加…" Command="{Binding Import}" Style="{StaticResource StandardButton}" HorizontalAlignment="Left"/></StackPanel></Expander>
  </StackPanel>
 </UserControl>

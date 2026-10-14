@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
@@ -133,6 +134,12 @@ public sealed class SessionModel : Observable
     }
 }
 
+public sealed record WalletRowModel(WalletBalance Value)
+{
+    public string Label => Value.Kind + " · " + Value.Currency;
+    public string Amount => Value.Amount.ToString("0.############################", CultureInfo.InvariantCulture);
+}
+
 public sealed class AccountModel : Observable
 {
     public PanelModel Owner
@@ -148,17 +155,25 @@ public sealed class AccountModel : Observable
     public ObservableCollection<SessionModel> Active { get; } = [];
     public ObservableCollection<SessionModel> Recent { get; } = [];
     public ObservableCollection<QuotaRowModel> Quotas { get; } = [];
+    public ObservableCollection<WalletRowModel> Wallets { get; } = [];
+    public ObservableCollection<WalletRowModel> ApiWallets { get; } = [];
+    public bool HasWallets => Wallets.Count > 0;
+    public bool HasApiBalance => quota?.ApiBalance != null;
+    public string ApiBalanceDetail => quota?.ApiBalance is { } api
+        ? api.Detail + (api.Observed is { } at ? " · " + (api.Cached ? "缓存 · " : "更新 · ") + at.ToLocalTime().ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture) : "") : "";
 
     private Snapshot snapshot = new(false, [], "", 0);
     private Quota? quota;
     private bool busy;
     public string Name => Value.Name;
     public bool Running => snapshot.Running;
-    public bool Missing => !System.IO.Directory.Exists(Value.ProfilePath);
-    public string OpenLabel => Missing ? "重新定位…" : Running ? "前台" : "启动";
+    public bool Missing => Value.App != "dsh" && !System.IO.Directory.Exists(Value.ProfilePath);
+    public string OpenLabel => Value.App == "dsh" ? Running ? "打开" : Value.Dsh?.Mode == "external" ? "连接" : "启动" : Missing ? "重新定位…" : Running ? "前台" : "启动";
     public string Empty => Missing ? "数据目录不存在" : snapshot.Sessions.Count == 0 ? Strings.Get("account.empty") : "";
-    public string QuotaDetail => Quotas.Count > 0 ? "" : busy ? "查询中…" : quota?.Detail.StartsWith("API Key", StringComparison.Ordinal) == true ? "不限" : quota?.Detail ?? "暂无数据";
+    public string QuotaDetail => Quotas.Count > 0 ? "" : busy ? "查询中…" : Value.App != "dsh" && quota?.Detail.StartsWith("API Key", StringComparison.Ordinal) == true ? "不限" : quota?.Detail ?? "暂无数据";
     public bool HasQuotaDetail => QuotaDetail.Length > 0;
+    public string SessionDetail => Value.App != "dsh" ? "" : snapshot.Cached ? "会话缓存" + (snapshot.Observed is { } at ? " · " + SessionModel.Relative(at) : "") + " · " + snapshot.Detail : snapshot.Detail;
+    public bool HasSessionDetail => SessionDetail.Length > 0;
     // As on macOS, the divider only separates in-progress rows from finished ones.
     public bool HasDivider => Active.Count > 0 && Recent.Count > 0;
     public bool HasEmpty => Empty.Length > 0;
@@ -199,7 +214,7 @@ public sealed class AccountModel : Observable
     {
         Owner = owner;
         Value = account;
-        Open = new Command(() => owner.Run(() => owner.Demo ? DemoOpen() : Missing ? owner.Relocate(Value) : owner.Clients.Open(Value)));
+        Open = new Command(() => owner.Run(() => owner.Demo ? DemoOpen() : Missing ? owner.Relocate(Value) : Value.App == "dsh" && Value.Dsh?.Mode == "external" && !Running ? owner.ReconnectDsh(Value) : owner.OpenClient(Value)));
         Refresh = new Command(() => owner.Run(() => owner.Refresh(Value)), () => !Busy && !Missing);
         More = new Command(() =>
         {
@@ -243,6 +258,11 @@ public sealed class AccountModel : Observable
         }
 
         Merge(Quotas, rows);
+        Merge(Wallets, (q?.Balances ?? []).Select(w => Wallets.FirstOrDefault(r => r.Value == w) ?? new WalletRowModel(w)));
+        Merge(ApiWallets, (q?.ApiBalance?.Balances ?? []).Select(w => ApiWallets.FirstOrDefault(r => r.Value == w) ?? new WalletRowModel(w)));
+        Changed(nameof(HasWallets));
+        Changed(nameof(HasApiBalance));
+        Changed(nameof(ApiBalanceDetail));
         var ordered = Ordering.Apply(next.Sessions, Owner.Store.Preferences.SessionOrder.GetValueOrDefault(Value.Id));
         var live = new List<SessionModel>();
         var stopped = new List<SessionModel>();
@@ -268,6 +288,9 @@ public sealed class AccountModel : Observable
         Changed(nameof(HasEmpty));
         Changed(nameof(HasMore));
         Changed(nameof(MoreLabel));
+        Changed(nameof(Cache));
+        Changed(nameof(SessionDetail));
+        Changed(nameof(HasSessionDetail));
     }
 }
 
@@ -281,7 +304,7 @@ public sealed class GroupModel : Observable
     {
         get;
     }
-    public string Name => App == "codex" ? "Codex" : "Claude";
+    public string Name => ClientKinds.Label(App);
     public ImageSource? Icon => Owner.ClientIcon(App);
     public string Initial => Name[..1];
     public ObservableCollection<AccountModel> Accounts { get; } = [];

@@ -28,6 +28,9 @@ The MIT License in LICENSE covers the Perch source code. The following are not c
   reserved. You may redistribute it unmodified as part of Perch builds.
 - Third-party code under macos/Vendor/, which keeps its own license
   (MediaRemote Adapter: BSD-3-Clause, see macos/Vendor/MediaRemoteAdapter/LICENSE).
-- Codex, ChatGPT and Claude names and client icons
+- Codex, ChatGPT, Claude and DeepSeek names and client icons
   (windows/src/Perch.App/Resources/ClientIcons/) belong to their owners and
   are used only to identify the corresponding desktop clients.
+  The white DeepSeek whale (dsh.svg) is the official favicon-dark.svg from
+  @deepseek-ai/dsh-web-frontend 0.1.7-rc.2, sourced from
+  https://github.com/deepseek-ai/deepseek-harness (apps/web/public/favicon-dark.svg).

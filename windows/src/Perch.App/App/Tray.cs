@@ -23,7 +23,7 @@ public sealed class Tray : IDisposable
         icon = new Forms.NotifyIcon
         {
             Icon = drawing,
-            Text = "Perch · Codex / Claude",
+            Text = "Perch · Codex / Claude / dsh",
             Visible = true
         };
         icon.MouseClick += (_, e) =>

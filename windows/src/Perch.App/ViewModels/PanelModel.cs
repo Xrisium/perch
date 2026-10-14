@@ -15,7 +15,7 @@ using Microsoft.VisualBasic.FileIO;
 
 namespace Perch.Windows;
 
-public sealed class PanelModel : Observable, IDisposable
+public sealed partial class PanelModel : Observable, IDisposable
 {
     public Store Store
     {
@@ -47,6 +47,7 @@ public sealed class PanelModel : Observable, IDisposable
     public Action? RequestHide;
     public Action<int>? PreviewPet;
     public Func<string, string, string?>? Prompt;
+    public Func<string, string, string?>? PromptConnection;
     public Func<Account, (bool Confirm, bool Recycle)>? ConfirmDelete;
     public Func<string, bool>? Confirm;
     public event Action<string>? BackgroundError;
@@ -131,6 +132,9 @@ public sealed class PanelModel : Observable, IDisposable
             Set(ref newKind, value);
             Changed(nameof(NewCodex));
             Changed(nameof(NewClaude));
+            Changed(nameof(NewDsh));
+            Changed(nameof(NewNative));
+            Changed(nameof(CreateLabel));
         }
     }
 
@@ -331,12 +335,14 @@ public sealed class PanelModel : Observable, IDisposable
     {
         Store = store;
         Demo = demo;
-        Quotas = new QuotaService(Clients);
+        InitializeDshEditor();
+        Dsh = new DshService(store);
+        Quotas = new QuotaService(Clients, Dsh);
         Handoffs = new Handoffs(store);
         Info = new(() => Navigate("info"));
         Settings = new(() => Navigate("settings"));
-        Add = new(() => Navigate("add"));
-        CancelAdd = new(() => Page = "accounts");
+        Add = new(() => { ResetDshEditor(); Navigate("add"); });
+        CancelAdd = new(() => { ResetDshEditor(); Page = "accounts"; });
         Create = new(() => Run(CreateAccount), () => !Interacting && !string.IsNullOrWhiteSpace(NewName));
         Import = new(() => Run(ImportAccount));
         TogglePet = new(() =>
@@ -470,7 +476,7 @@ public sealed class PanelModel : Observable, IDisposable
         {
             await Task.Run(() => Clients.Scan());
             var list = Store.Accounts.ToArray();
-            var reads = await Task.Run(() => list.Select(a => (a.Id, Snapshot: Sessions.Read(a, Clients))).ToArray());
+            var reads = await Task.WhenAll(list.Select(async a => (a.Id, Snapshot: a.App == "dsh" ? await Dsh.Read(a) : await Task.Run(() => Sessions.Read(a, Clients)))));
             foreach (var (id, snapshot) in reads)
                 snapshots[id] = snapshot;
             MergeAccounts();
@@ -496,6 +502,8 @@ public sealed class PanelModel : Observable, IDisposable
             vm.Busy = true;
         try
         {
+            if (account.App == "dsh")
+                snapshots[account.Id] = await Dsh.Read(account);
             await Quotas.Refresh(account, manual);
         }
         finally
@@ -575,6 +583,23 @@ public sealed class PanelModel : Observable, IDisposable
     {
         if (icons.TryGetValue(app, out var icon))
             return icon;
+        if (app == "dsh")
+        {
+            // Official DeepSeek whale from dsh-web-frontend's white favicon.
+            var svg = System.Xml.Linq.XDocument.Load(Path.Combine(AppContext.BaseDirectory, "Resources", "ClientIcons", "dsh.svg"));
+            var pathData = svg.Root!.Elements().Single().Attribute("d")!.Value;
+            var whale = new DrawingGroup();
+            using (var drawing = whale.Open())
+            {
+                // Keep the requested white mark visible on the light theme too.
+                drawing.DrawRoundedRectangle(darkIcons ? Brushes.Transparent : new SolidColorBrush(Color.FromRgb(48, 51, 55)), null, new Rect(0, 0, 50, 50), 8, 8);
+                drawing.DrawGeometry(Brushes.White, null, Geometry.Parse(pathData));
+            }
+            icon = new DrawingImage(whale);
+            icon.Freeze();
+            icons[app] = icon;
+            return icon;
+        }
         try
         {
             var path = Clients.Installed.FirstOrDefault(c => c.App == app)?.Executable;
@@ -629,7 +654,7 @@ public sealed class PanelModel : Observable, IDisposable
             return;
         }
 
-        await Clients.Open(account);
+        await OpenClient(account);
         int count = Clients.Processes.Count(p => p.Executable.EndsWith("ChatGPT.exe", StringComparison.OrdinalIgnoreCase) && !Clients.Arguments(p.CommandLine).Any(a => a.StartsWith("--type", StringComparison.Ordinal) || a == "--crashpad-handler"));
         if (SessionRouting.CanDeepLink(account.App, session.Id, count))
             Process.Start(new ProcessStartInfo("codex://threads/" + session.Id) { UseShellExecute = true })?.Dispose();
@@ -644,6 +669,11 @@ public sealed class PanelModel : Observable, IDisposable
             return;
         }
 
+        if (NewDsh)
+        {
+            await CreateDsh();
+            return;
+        }
         var account = Store.Create(NewName, NewKind == 0 ? "codex" : "claude");
         NewName = "";
         Page = "accounts";
@@ -672,6 +702,11 @@ public sealed class PanelModel : Observable, IDisposable
 
     public Task Relocate(Account account)
     {
+        if (account.App == "dsh")
+        {
+            ConfigureDsh(account);
+            return Task.CompletedTask;
+        }
         var folder = new OpenFolderDialog
         {
             Title = "重新定位账号数据目录"
@@ -710,7 +745,7 @@ public sealed class PanelModel : Observable, IDisposable
         var choice = ConfirmDelete?.Invoke(account) ?? (false, false);
         if (!choice.Item1)
             return;
-        if (choice.Item2 && !account.Default && Directory.Exists(account.ProfilePath))
+        if (choice.Item2 && account.App != "dsh" && !account.Default && Directory.Exists(account.ProfilePath))
         {
             if (Store.SamePath(account.ProfilePath, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)) || Store.SamePath(account.ProfilePath, Store.Root))
                 throw new IOException("不能回收用户目录或 Perch 数据根目录。");
@@ -747,8 +782,14 @@ public sealed class PanelModel : Observable, IDisposable
             Run(RefreshAll);
     }
 
-    public void BeginHandoff(Account source, Account target, Session session)
+    public async Task BeginHandoff(Account source, Account target, Session session)
     {
+        if (source.App == "dsh" && !Demo)
+        {
+            snapshots[source.Id] = await Dsh.Read(source);
+            MergeAccounts();
+            if (!CanHandoff(source, session)) throw new IOException("请先连接 dsh 并停下任务，再开始接力。");
+        }
         var pending = Handoffs.Prepare(source, target, session);
         try
         {
@@ -760,11 +801,10 @@ public sealed class PanelModel : Observable, IDisposable
         }
 
         if (!Demo)
-            Run(async () =>
-            {
-                await Clients.Open(source);
-                RequestHide?.Invoke();
-            });
+        {
+            await OpenClient(source);
+            RequestHide?.Invoke();
+        }
     }
 
     private async Task Finish(bool choose)
@@ -789,10 +829,12 @@ public sealed class PanelModel : Observable, IDisposable
         Changed(nameof(ContinueLabel));
         try
         {
+            if (!Demo && target.App == "dsh")
+                await Dsh.Ensure(target);
             Handoffs.Transfer(ClipboardWriter.Set, path);
             UpdateHandoffs();
             if (!Demo)
-                await Clients.Open(target);
+                await OpenClient(target);
             Notify("接力文档已复制，请在目标新对话粘贴发送。");
         }
         finally
@@ -821,7 +863,7 @@ public sealed class PanelModel : Observable, IDisposable
             Notify(recovery);
     }
 
-    public static string Label(string app) => app == "codex" ? "Codex" : "Claude";
+    public static string Label(string app) => ClientKinds.Label(app);
     public static void Reveal(string path)
     {
         var info = new ProcessStartInfo("explorer.exe")
@@ -838,7 +880,8 @@ public sealed class PanelModel : Observable, IDisposable
         {
             ("codex", "Omnix 工作", false),
             ("codex", "个人项目", true),
-            ("claude", "Claude 研究", false)
+            ("claude", "Claude 研究", false),
+            ("dsh", "dsh 工作", false)
         }
 
         )
@@ -866,6 +909,13 @@ public sealed class PanelModel : Observable, IDisposable
             };
             snapshots[a.Id] = new Snapshot(!missing, list, "", 1);
             demoQuotas[a.Id] = new Quota([new("5h", app == "codex" ? 72 : 92, now.AddHours(3)), new("周", 36, now.AddDays(4))], now.AddMinutes(-8), missing ? "网络暂不可用" : "", missing);
+            if (app == "dsh")
+            {
+                a.Dsh = new DshConfiguration();
+                snapshots[a.Id] = new(true, [new("demo-dsh-live", "查看 DeepSeek Harness 适配", "运行中", now.AddMinutes(-2)), new("demo-dsh-idle", "准备 Markdown 交接", "已完成", now.AddMinutes(-10)), new("demo-dsh-cold", "检查历史工作", "已完成", now.AddHours(-1))], "dsh 本机 Web", 0, now);
+                demoQuotas[a.Id] = new([], now, "默认模型：DeepSeek API Key 已配置\n官方账户已登录 · 官方钱包与 API 余额独立查询", Balances: [new("充值", "CNY", 32.58m), new("赠送", "CNY", 5.25m)],
+                    ApiBalance: new([new("总额", "CNY", 19.23456789m), new("充值", "CNY", 18m), new("赠送", "CNY", 1.23456789m)], now, "查询成功（演示）"));
+            }
         }
 
         var source = Store.Accounts[0];
@@ -884,5 +934,6 @@ public sealed class PanelModel : Observable, IDisposable
         pollTimer.Stop();
         clock.Stop();
         messageTimer.Stop();
+        Dsh.Dispose();
     }
 }

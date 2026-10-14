@@ -38,6 +38,7 @@ public partial class Panel : Window, IDisposable
         Model.RequestHide = Hide;
         Model.PreviewPet = i => pet?.Preview(i);
         Model.Prompt = (title, value) => InlineDialog.Ask(this, title, value);
+        Model.PromptConnection = (title, value) => InlineDialog.Ask(this, title, value, 8192);
         Model.Confirm = text => InlineDialog.Confirm(this, text);
         Model.ConfirmDelete = account => InlineDialog.Delete(this, account);
         Model.BackgroundError += value =>

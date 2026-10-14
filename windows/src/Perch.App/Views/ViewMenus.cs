@@ -38,6 +38,12 @@ public static class ViewMenus
         var menu = new ContextMenu();
         menu.Items.Add(Item("改名…", () => model.Run(() => model.Rename(account.Value))));
         menu.Items.Add(Item("打开数据目录", () => model.Run(() => PanelModel.Reveal(account.Value.ProfilePath))));
+        if (account.Value.App == "dsh")
+        {
+            menu.Items.Add(Item("启动配置…", () => model.ConfigureDsh(account.Value)));
+            menu.Items.Add(Item("重新连接…", () => model.Run(() => model.ReconnectDsh(account.Value))));
+            menu.Items.Add(Item(account.Value.Dsh?.Mode == "external" ? "断开连接" : "停止 dsh 服务…", () => model.Run(() => model.StopDsh(account.Value))));
+        }
         var client = model.Clients.Installed.FirstOrDefault(c => c.App == account.Value.App);
         if (client != null && !account.Value.Default)
             menu.Items.Add(Item("改用直接打开的 " + PanelModel.Label(client.App) + "…", () => model.Run(() => model.SwitchDefault(account.Value, client))));
@@ -57,14 +63,17 @@ public static class ViewMenus
         var handoff = new MenuItem
         {
             Header = "接力到…",
-            IsEnabled = session.Status is not ("运行中" or "等待输入")
+            IsEnabled = model.CanHandoff(session.Account.Value, session.Value)
         };
         foreach (var target in model.Store.Accounts.Where(a => a.Id != session.Account.Value.Id))
             handoff.Items.Add(Item(target.Name + "（" + PanelModel.Label(target.App) + "）", () => model.Run(() => model.BeginHandoff(session.Account.Value, target, session.Value))));
         menu.Items.Add(handoff);
-        menu.Items.Add(new Separator());
-        menu.Items.Add(Item("复制会话文件路径", () => model.Run(() => ClipboardWriter.Set(session.Value.Path)), session.Value.Path.Length > 0));
-        menu.Items.Add(Item("在资源管理器中显示", () => model.Run(() => PanelModel.Reveal(session.Value.Path)), File.Exists(session.Value.Path)));
+        if (session.Value.Path.Length > 0)
+        {
+            menu.Items.Add(new Separator());
+            menu.Items.Add(Item("复制会话文件路径", () => model.Run(() => ClipboardWriter.Set(session.Value.Path))));
+            menu.Items.Add(Item("在资源管理器中显示", () => model.Run(() => PanelModel.Reveal(session.Value.Path)), File.Exists(session.Value.Path)));
+        }
         Show(owner, menu);
     }
 
