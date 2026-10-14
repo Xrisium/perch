@@ -164,6 +164,7 @@ static class Program
             Check(scaled.X == 2303 && scaled.Y == 585 && scaled.Width == 510, "Physical origins and scaled dimensions stay separate");
             Check(Sessions.Status("error", true, DateTimeOffset.UtcNow) == "遇到问题", "Failed tasks must remain distinct from stopped tasks");
             FixtureTests.Run(root);
+            DshApiBalanceTests.Run(root).GetAwaiter().GetResult();
             Console.WriteLine("PASS: persistence, ACLs, process isolation, quota windows, task lifecycle, handoff recovery and document preservation");
         }
         finally
