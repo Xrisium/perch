@@ -31,6 +31,7 @@ Windows 版本来自 `windows/VERSION`，当前为 0.2.0。系统要求 Windows 
 - Codex 以 READONLY 读取 SQLite，保留运行中 WAL 可见性，标题优先索引元数据；Claude 按各 profile 读取桌面会话 JSON 与 audit 尾部。未变化的文件使用缓存。
 - Codex 用原生 RPC 查询额度；Claude 通过当前账号授权访问官方 usage 服务，DPAPI 解密仅在内存。第三方模式不假造官方订阅额度。
 - 接力执行 Read → Clipboard → Commit → Clear；复制失败保留待办，不生成记录或副本。不读取原聊天生成文档、不调用模型或自动发送消息。
+- dsh 使用独立安装／home 配置和本机认证 RPC，后台宿主模式在 WPF 单实例入口之前分派。实例按 home 匹配并持有命名 mutex，动态端口与授权写入 DPAPI 加密记录；退出面板不停止服务。详见 [dsh 使用与复验](deepseek-harness.md)。
 - 原生浮球保持系统主题；Pox 主题在隐藏桌宠后保留。媒体感知只读取播放状态及类型，不读取歌曲、视频或窗口标题。
 
 历史探针和逐项开发计划已归档到整理前的备份；当前可用范围与未验收项集中见 [验收说明](acceptance.md)。

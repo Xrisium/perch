@@ -13,4 +13,4 @@ Windows 轮询通过进程内 Win32 查询，显示时 5 秒、全部隐藏时 2
 
 接力按 Read → Clipboard → Commit → Clear 执行；复制失败保留待办且不产生记录或副本。只处理用户指定的 Markdown，不自动发送聊天。
 
-Windows 版本来自 `windows/VERSION`，tag 为 `windows-v*`；macOS 版本来自 `macos/VERSION`，tag 为 `macos-v*`。CI 按目录分别运行。已发布的 macOS 1.0.x 保留旧 `v*` tag。Windows 自包含 x64 ZIP 与 SHA256 可本地生成；尚无远端发行包、安装器、签名或开机启动。Windows 详细模块与运行见 [Windows 架构](windows/architecture.md)。
+Windows 版本来自 `windows/VERSION`，tag 为 `windows-v*`；macOS 版本来自 `macos/VERSION`，tag 为 `macos-v*`。CI 按目录分别运行。已发布的 macOS 1.0.x 保留旧 `v*` tag。Windows 0.2.0 已发布预览版，自包含 x64 ZIP 与 SHA256 可本地生成；尚无安装器、签名或开机启动。Windows 新增 dsh Web 支持，独立后台宿主与本机认证 RPC 不依赖 dsh 源码导入；详细模块与运行见 [Windows 架构](windows/architecture.md)。

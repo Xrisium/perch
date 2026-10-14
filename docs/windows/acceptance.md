@@ -1,5 +1,40 @@
 # Windows 验证与验收
 
+## 2026-10-14：dsh 会话完成勾选
+
+- Windows Test、Publish／Package 通过。回归覆盖明确完成、取消／中断／fork、错误／阻塞／输出上限、未知结束原因、新任务覆盖旧完成、待处理输入、事件接口失败降级、游标缓存与完成会话接力。
+- 只读核对已有本机服务的 32 条根会话：25 条明确完成、7 条停止；逐条重新读取完成记录的最近事件，确认绿色勾选对应 `turn/end` 的 `completed`，未发送提示词、调用模型或保存正文。
+- 最终自包含程序的演示与真实账号截图均已检查，完成会话显示绿色 ✓ 与“已完成”，停止会话显示红色 ! 与“已停止”。截图仅保存在忽略目录 `scratch/dsh-completion-ui-dark` 与 `scratch/dsh-completion-real-ui`。截图验收后以普通 `--show` 启动新版面板。
+- 新版位于 `dist.noindex/windows/Perch-completion/Perch.exe`；原目录被 dsh 宿主占用，保留原宿主和 node 服务，只重启 Perch 面板。未关闭 Codex／Claude、修改登录配置或发布远端版本。实时模型任务的完成通知与完整人工接力流程仍待相应验收。
+
+## 2026-10-14：独立 DeepSeek API 余额查询
+
+- Windows Test、Publish、Package 通过；API 凭据解析与错误信息脱敏、官方固定端点／重定向拒绝、CNY／USD 十进制金额、限流／超时／鉴权失败、五分钟节流与手动刷新、Key／引用／home 变化和账号缓存隔离通过回归。环境／dotenv 来源不回退到文件 Key。
+- 通过正常 DshService 查询本机已有账号的官方 API，取得非缓存的 CNY 总额／充值／赠送结果；没有输出 Key 或金额，没有复制密钥、修改登录或调用模型。官方登录账户仍为未登录，此结果不代表登录钱包验收。
+- 使用最终自包含 Perch.exe，以 `--data-root` 在仓库 scratch 的隔离配置中复用 DPAPI 加密的已有本机授权，选择实际 home，正常查询并显示 API 余额；不是 demo，不依赖 dsh-cost-meter。截图检查了真实结果、浅／深主题演示卡片和外部实例的可选凭据目录。
+- 演示截图位于 `scratch/api-balance-qa/light`、`dark`、`external`，真实产品截图位于 `scratch/api-balance-qa/real`；真实截图只留本机 scratch，不纳入版本控制。截图可使用 `--screenshot-delay-ms 20000` 等待异步刷新。
+- 原发布目录被仍在运行的个人 dsh 宿主占用，新版输出到 `dist.noindex/windows/Perch-api-balance/Perch.exe`；便携 ZIP 在 `dist.noindex/windows/releases`。旧宿主保留运行，没有停止 dsh、Codex 或 Claude，也未发布远端 Release。便携包包含 YamlDotNet 的 MIT 版权与许可通知。
+
+## 2026-10-14：dsh 徽标、登录／计费状态与会话标题修复
+
+- 对照本机真实 `0.1.7-rc.2` RPC 验证：35 个根会话及其工作目录可读，32 个已命名会话与 Web 的 `projections.values.title` 字符串一致，其余无标题；未保存或输出真实标题及正文。
+- 本机真实官方账户状态为 `signed-out`，默认模型提供方为 `deepseek-official`，脱敏凭据接口确认 API Key 已配置。修复后分别显示默认 API Key 计费通道与官方账户登录状态。API Key 余额不由 dsh 官方账户钱包接口提供，仍需在提供方查看。
+- Windows Core 全套测试通过，增加字符串标题、历史标题、未配置密钥、第三方通道、过期登录和未知账户状态回归。测试依赖当前用户 DPAPI，需在当前用户环境运行；沙箱身份下的 DPAPI 失败不算通过。
+- 最终自包含构建通过；真实源码／npm 两个隔离 home 的启动、认证、未配置密钥、手动断开与恢复连接 smoke 通过。明暗主题演示截图在 `scratch/qa-dsh-fix/`，白色鲸鱼在浅色主题使用深色底。
+- 本地 `dist.noindex/windows/Perch/Perch.exe` 已替换并重启面板，原有 dsh 宿主保持运行，替换后真实连接复验通过。运行中的宿主锁定发布目录，直接 Package 的 Publish 步骤无法覆盖 apphost；改从已验证的独立发布目录打包同样的便携 ZIP，并保留旧构建供运行中的宿主使用。未发布远端 Release，未改变个人登录配置，未停止个人客户端。
+- 真实网页登录官方账户的非空钱包余额仍待相应账户实测；已通过协议样本验证精度及错误分支。
+
+## 2026-10-14：dsh Web 适配
+
+- .NET 10.0.400 下 Test、Release Build、Publish、Package 通过，生成本地自包含便携包；未发布远端 Release。NuGet 直连 TLS 失败后，使用微软官方 dotnet-public 源下载原有依赖到仓库 scratch 缓存，未修改依赖来源配置。
+- 回归覆盖源码／npm 本地安装解析、含空格路径、缺少 Node／Web 构建、旧排序兼容、DPAPI 加密、命名 RPC 参数与认证、请求相关性及错误／取消、钱包精度、缓存与接力保护。
+- 独立测试进程启动服务后真正退出，服务仍存活；后台宿主异常退出后正确报告存活子进程且不重复启动；子进程退出后缓存转为未知、阻止来源接力；移除记录保留服务，外部实例断开不会停止它。
+- 本机源码构建版和 npm 全局安装版均为 dsh `0.1.7-rc.2`。用两个隔离 home 验证真实启动、动态端口、认证、会话列表、手动连接／断开和恢复连接，并用最终自包含 Perch.exe 再次验证宿主路径。两个 home 均无会话，真实余额接口验证的是未登录返回，不是登录钱包或真实任务。
+- 三主题下源码／npm／已有实例配置页及 dsh 会话／钱包卡片共 12 个演示渲染通过；检查了布局、文字和金额。演示不读取真实客户端。默认浏览器打开请求已执行，浏览器内容与完整鼠标／键盘创建流程未验收。
+- 使用提供的测试 Markdown 验证 dsh 来源／目标的接力事务；未自动发送消息。官方登录余额、真实运行／等待／结束任务及源 agent 生成文档后目标 agent 实际接手仍待人工实测。
+
+截图位于本机 `scratch/qa-dsh/`，真实复验入口和范围见 [dsh 指南](deepseek-harness.md)。上述测试只停止隔离测试服务，未关闭个人客户端或改变其登录配置。
+
 本页汇总 2026-10-09 至 2026-10-10 的 Windows 本机交付记录。记录来自当时的 Windows 11 x64 / .NET 10.0.401 环境；不能当作本次在 macOS 上重做的 Windows 验证，也不代表已发布 GitHub Release。
 
 ## 已验证的范围
