@@ -11,6 +11,9 @@ struct AccountCard: View {
         let rows = perch.rows(for: account)
         let running = perch.runningIDs.contains(account.id)
         let missing = perch.dataMissing(account)
+        // The Antigravity CLI card shows a quota only after the owner refreshed it.
+        let queried = perch.providerUsage[account.id] != nil || perch.providerUsageErrors[account.id] != nil
+            || perch.refreshingQuotas.contains(account.id)
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text(perch.title(for: account)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
@@ -20,29 +23,44 @@ struct AccountCard: View {
                 Spacer(minLength: 4)
                 if !missing, let quota = perch.quotas[account.id] {
                     QuotaFreshnessView(quota: quota)
+                } else if !missing, perch.supportsProviderUsage(account) {
+                    QuotaFreshnessView(quota: ProviderUsagePresentation.display(
+                        usage: perch.providerUsage[account.id], error: perch.providerUsageErrors[account.id]))
                 }
-                if !missing {
+                if !missing, account.app.hasQuota || perch.supportsProviderUsage(account) {
                     Button { perch.refreshQuota(account) } label: {
                         Image(systemName: "arrow.clockwise")
                             .opacity(perch.refreshingQuotas.contains(account.id) ? 0.4 : 1)
                     }
                     .buttonStyle(.plain).font(.system(size: 10)).foregroundStyle(.secondary)
                     .disabled(perch.refreshingQuotas.contains(account.id))
-                    .help(perch.refreshingQuotas.contains(account.id) ? "正在同步额度…" : "立即同步额度")
+                    .help(perch.refreshingQuotas.contains(account.id) ? "正在同步额度…"
+                          : account.app == .antigravity ? "运行一次 agy 查询额度" : "立即同步额度")
                     .accessibilityLabel("同步 \(account.name) 的额度")
                 }
                 if missing {
-                    Button("重新定位") { perch.relocate(account) }.controlSize(.small)
+                    // Desktop accounts can be pointed at other data. A local provider's data directory cannot be
+                    // changed here: the owner deletes it and adds the new directory from a scan.
+                    if account.localProvider == nil { Button("配置") { perch.relocate(account) }.controlSize(.small) }
                 } else {
-                    Button(running ? "前台" : "启动") { perch.launch(account) }.controlSize(.small)
+                    Button(launchLabel(running: running)) { perch.launch(account) }.controlSize(.small)
                 }
+            }
+            if perch.localWebURL(account) != nil {
+                Button("打开本机网页") { perch.openLocalWeb(account) }.controlSize(.small)
+                Text("先启动服务，再打开网页。登录在客户端完成。").font(.system(size: 10)).foregroundStyle(.secondary)
             }
             if !missing, let quota = perch.quotas[account.id] {
                 QuotaRowView(quota: quota)
             }
+            if !missing, perch.supportsProviderUsage(account), account.app != .antigravity || queried {
+                ProviderUsageView(usage: perch.providerUsage[account.id], error: perch.providerUsageErrors[account.id],
+                                  refreshing: perch.refreshingQuotas.contains(account.id))
+            }
             if missing {
-                Text("数据目录不存在").font(.system(size: 11)).foregroundStyle(.orange)
-            } else if rows.isEmpty {
+                Text(account.localProvider == nil ? "数据目录不存在" : "数据目录不存在，删除后重新扫描添加")
+                    .font(.system(size: 11)).foregroundStyle(.orange)
+            } else if rows.isEmpty, account.app != .geminiApp {
                 Text(perch.emptyText(for: account)).font(.system(size: 11)).foregroundStyle(.secondary)
             }
             let active = rows.filter(\.isActive)
@@ -74,10 +92,15 @@ struct AccountCard: View {
         } isTargeted: { targeted = $0 }
         .contextMenu {
             Button("改名…") { perch.rename(account) }
-            if !perch.isDefaultData(account) {
+            if account.app.hasQuota, !perch.isDefaultData(account) {
                 Button("改用直接打开的 \(account.app.displayName)…") { perch.useDefaultData(account) }
             }
             Button("删除…") { perch.delete(account) }
         }
+    }
+    private func launchLabel(running: Bool) -> String {
+        if account.app == .deepseek, account.localProvider?.kind == .terminal { return running ? "终端" : "启动服务" }
+        if account.localProvider?.kind == .terminal { return running ? "终端" : "启动" }
+        return running ? "前台" : "启动"
     }
 }

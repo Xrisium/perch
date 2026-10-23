@@ -183,10 +183,6 @@ public sealed class DshService(Store store, string? hostExecutable = null) : IDi
         finally { entry.Gate.Release(); }
     }
 
-    public static bool CanHandoff(Snapshot? snapshot, string sessionId) => snapshot is { Running: true, Cached: false, Observed: { } at }
-        && DateTimeOffset.UtcNow - at < TimeSpan.FromSeconds(30)
-        && snapshot.Sessions.Exists(s => s.Id == sessionId && s.Status is "空闲" or "未运行" or "已完成" or "已停止" or "遇到问题");
-
     public async Task Stop(Account account)
     {
         var entry = For(account);

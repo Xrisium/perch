@@ -25,6 +25,7 @@ public partial class Panel : Window, IDisposable
     private readonly bool keepOpen;
     private DateTimeOffset lastHidden;
     public event Action<string>? BackgroundError;
+    public event Action<string, string, NoticeAction?>? Notice;
     public Panel(Store state, ThemeManager themes, bool demo, bool keep, bool inspection)
     {
         theme = themes;
@@ -41,6 +42,7 @@ public partial class Panel : Window, IDisposable
         Model.PromptConnection = (title, value) => InlineDialog.Ask(this, title, value, 8192);
         Model.Confirm = text => InlineDialog.Confirm(this, text);
         Model.ConfirmDelete = account => InlineDialog.Delete(this, account);
+        Model.Notice += (title, body, action) => Notice?.Invoke(title, body, action);
         Model.BackgroundError += value =>
         {
             if (!IsVisible)
@@ -87,7 +89,8 @@ public partial class Panel : Window, IDisposable
         }
 
         UpdatePet();
-        Loaded += async (_, _) => await Model.Start();
+        // Poll from launch, not from the first panel open, so the pet and tray follow tasks right away.
+        Dispatcher.InvokeAsync(Model.Start);
     }
 
     private void ApplyTheme()
@@ -239,7 +242,7 @@ public partial class Panel : Window, IDisposable
     }
 
     public void TogglePet() => Model.TogglePet.Execute(null);
-    public void ResetPet() => pet?.ResetPosition();
+    public void ResetPet() => Model.Run(() => pet?.ResetPosition());
     public void DemoPet(int? pose, bool complete)
     {
         if (!Model.Demo || pet == null)

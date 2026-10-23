@@ -26,7 +26,8 @@ public sealed class Account
     }
 }
 
-public sealed record Session(string Id, string Title, string Status, DateTimeOffset Updated, string Cwd = "", string Path = "");
+// Exec: started by `codex exec` (for example a delegate run) rather than in the desktop app.
+public sealed record Session(string Id, string Title, string Status, DateTimeOffset Updated, string Cwd = "", string Path = "", bool Exec = false);
 public sealed record QuotaWindow(string Name, double Used, DateTimeOffset? Resets);
 public sealed record WalletBalance(string Kind, string Currency, decimal Amount);
 public sealed record ApiBalanceResult(List<WalletBalance> Balances, DateTimeOffset? Observed, string Detail, bool Cached = false);
@@ -37,6 +38,7 @@ public sealed record Snapshot(bool Running, List<Session> Sessions, string Detai
 public sealed class Preferences
 {
     public bool AutoQuota { get; set; } = true;
+    public bool NotifySessionChanges { get; set; } = true;
     public bool PetEnabled
     {
         get; set;
@@ -84,11 +86,9 @@ public sealed class Store
     {
         get;
     }
-    public string Handoffs => Path.Combine(Root, "handoffs");
-    public string? RecoveryDetail
-    {
-        get; private set;
-    }
+    private string? recoveryDetail;
+    // Content last read from or written to disk, so Save skips files that did not change.
+    private readonly Dictionary<string, string> saved = [];
 
     public Store(string? root = null)
     {
@@ -111,29 +111,54 @@ public sealed class Store
         {
             File.Move(Path.Combine(Root, "preferences.json"), Path.Combine(Root, "preferences.json.unreadable-" + Guid.NewGuid().ToString("N") + ".json"));
             Preferences = new();
-            RecoveryDetail = "偏好文件无法读取，已保留备份并恢复默认设置。";
+            recoveryDetail = "偏好文件无法读取，已保留备份并恢复默认设置。";
         }
+
+        if (File.Exists(Path.Combine(Root, "accounts.json")))
+            saved["accounts.json"] = JsonSerializer.Serialize(Accounts, Json);
+        if (File.Exists(Path.Combine(Root, "preferences.json")))
+            saved["preferences.json"] = JsonSerializer.Serialize(Preferences, Json);
         // Append newly supported clients without disturbing the user's saved order.
         foreach (var app in ClientKinds.All)
             if (!Preferences.GroupOrder.Contains(app))
                 Preferences.GroupOrder.Add(app);
     }
 
+    /// Returns the recovery notice once, then forgets it.
+    public string? TakeRecoveryDetail()
+    {
+        var detail = recoveryDetail;
+        recoveryDetail = null;
+        return detail;
+    }
+
     public T? Read<T>(string name) => File.Exists(Path.Combine(Root, name)) ? JsonSerializer.Deserialize<T>(File.ReadAllText(Path.Combine(Root, name)), Json) : default;
     public void Save()
     {
-        Write("accounts.json", Accounts);
-        Write("preferences.json", Preferences);
+        SaveChanged("accounts.json", Accounts);
+        SaveChanged("preferences.json", Preferences);
     }
 
-    public void Write<T>(string name, T value)
+    // The panel saves on every pet move and poll; unchanged files are left alone.
+    private void SaveChanged<T>(string name, T value)
+    {
+        var text = JsonSerializer.Serialize(value, Json);
+        if (saved.TryGetValue(name, out var last) && last == text)
+            return;
+        WriteText(name, text);
+        saved[name] = text;
+    }
+
+    public void Write<T>(string name, T value) => WriteText(name, JsonSerializer.Serialize(value, Json));
+
+    private void WriteText(string name, string text)
     {
         var target = Path.Combine(Root, name);
         PrivateDirectory(Path.GetDirectoryName(target)!);
         var temp = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllText(temp, JsonSerializer.Serialize(value, Json));
+            File.WriteAllText(temp, text);
             File.Move(temp, target, true);
         }
         finally
@@ -181,6 +206,15 @@ public sealed class Store
             throw new InvalidOperationException("这个客户端目录已经添加。");
         Accounts.Add(account);
         Save();
+    }
+
+    /// Refuses to recycle the user folder, Perch's own root, or a profile a client still has open.
+    public void CheckRecycle(Account account, bool running)
+    {
+        if (running)
+            throw new IOException("客户端仍在使用这个数据目录，请先退出它再移除并回收。");
+        if (SamePath(account.ProfilePath, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)) || SamePath(account.ProfilePath, Root))
+            throw new IOException("不能回收用户目录或 Perch 数据根目录。");
     }
 
     public void Remove(Account account)

@@ -6,6 +6,7 @@ struct SessionRow: Identifiable {
     enum Kind {
         case codex(CodexTask)
         case claude(ClaudeSession)
+        case local(LocalProviderSession)
     }
     let kind: Kind
 
@@ -13,30 +14,35 @@ struct SessionRow: Identifiable {
         switch kind {
         case .codex(let task): return task.id
         case .claude(let session): return session.id
+        case .local(let session): return session.id
         }
     }
     var title: String {
         switch kind {
         case .codex(let task): return task.title
         case .claude(let session): return session.title
+        case .local(let session): return session.title
         }
     }
     var path: String? {
         switch kind {
         case .codex(let task): return task.rolloutPath
         case .claude(let session): return session.path
+        case .local(let session): return session.path
         }
     }
     var status: TaskStatus {
         switch kind {
         case .codex(let task): return task.status
         case .claude(let session): return session.status
+        case .local(let session): return session.status
         }
     }
-    var updatedAt: Date {
+    var updatedAt: Date? {
         switch kind {
         case .codex(let task): return task.updatedAt
         case .claude(let session): return session.updatedAt
+        case .local(let session): return session.updatedAt
         }
     }
     var isClaudeCode: Bool {
@@ -44,10 +50,20 @@ struct SessionRow: Identifiable {
         return URL(fileURLWithPath: session.path).pathExtension == "jsonl"
             && URL(fileURLWithPath: session.path).lastPathComponent != "audit.jsonl"
     }
+    /// A `codex exec` run, such as one a delegate skill started; these are not user conversations, so they are not notified.
+    var isExec: Bool {
+        guard case .codex(let task) = kind else { return false }
+        return task.isExec
+    }
     var isActive: Bool { status.isActive }
+    var statusLabel: String {
+        if case .local = kind, status == .unknown { return "本地记录" }
+        return status.label
+    }
     /// Every row shows its status; the time is shown beside it, never instead of it.
     var age: String {
         let now = Date()
+        guard let updatedAt else { return "时间未知" }
         // A file touched a moment ago can be a hair ahead of `now`; "0 秒后" reads wrong.
         if abs(now.timeIntervalSince(updatedAt)) < 60 { return "刚刚" }
         return Self.relative.localizedString(for: updatedAt, relativeTo: now)
@@ -95,7 +111,7 @@ struct SessionRowView: View {
             }
             Spacer(minLength: 4)
             Text(row.age).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize()
-            Text(row.status.label).font(.system(size: 10)).foregroundStyle(.primary).fixedSize()
+            Text(row.statusLabel).font(.system(size: 10)).foregroundStyle(.primary).fixedSize()
         }
         .font(.system(size: 12))
         .padding(.vertical, 1)
@@ -120,14 +136,6 @@ struct SessionRowView: View {
         } isTargeted: { targeted = $0 }
         .contextMenu {
             Button("打开") { perch.open(row, in: account) }
-            let targets = perch.accounts.filter { $0.id != account.id }
-            if !targets.isEmpty {
-                Menu("接力到…") {
-                    ForEach(targets) { target in
-                        Button("\(target.name)（\(target.app.displayName)）") { perch.handoff(row, from: account, to: target) }
-                    }
-                }
-            }
             if let path = row.path {
                 Button("复制会话文件路径") { perch.copy(path) }
                 Button("在 Finder 中显示") { perch.reveal(path) }

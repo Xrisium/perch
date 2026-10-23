@@ -20,7 +20,6 @@ internal static class FixtureTests
         var e = expected.RootElement;
         foreach (var key in Strings.All.Keys)
             Check(!string.IsNullOrWhiteSpace(Strings.Get(key)), "Missing string: " + key);
-        Check(Handoffs.Prompt("D:/demo.md") == Strings.Get("handoff.prompt").Replace("{path}", "D:/demo.md"), "Shared handoff prompt");
         var home = Path.Combine(root, "fixture-home");
         Directory.CreateDirectory(home);
         File.Copy(Path.Combine(fixtures, "codex", "session_index.jsonl"), Path.Combine(home, "session_index.jsonl"));

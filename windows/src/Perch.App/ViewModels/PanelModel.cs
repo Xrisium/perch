@@ -10,8 +10,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
-using Microsoft.Win32;
-using Microsoft.VisualBasic.FileIO;
 
 namespace Perch.Windows;
 
@@ -26,18 +24,13 @@ public sealed partial class PanelModel : Observable, IDisposable
     {
         get;
     }
-    public Handoffs Handoffs
-    {
-        get;
-    }
     public bool Demo
     {
         get;
     }
-    public bool Interacting
-    {
-        get; private set;
-    }
+    // Counts user-started operations (dialogs, launches) that keep the panel open; background refreshes do not count.
+    private int interacting;
+    public bool Interacting => interacting > 0;
     public bool Sorting
     {
         get; set;
@@ -53,13 +46,11 @@ public sealed partial class PanelModel : Observable, IDisposable
     public event Action<string>? BackgroundError;
     public ObservableCollection<GroupModel> Groups { get; } = [];
     public ObservableCollection<DiscoveredModel> Discovered { get; } = [];
-    public ObservableCollection<HistoryModel> History { get; } = [];
 
     private readonly Dictionary<string, AccountModel> accounts = [];
     private readonly Dictionary<string, GroupModel> groups = [];
     private readonly Dictionary<string, ImageSource?> icons = [];
     private readonly Dictionary<string, Snapshot> snapshots = [];
-    private readonly Dictionary<string, Quota> demoQuotas = [];
     private readonly DispatcherTimer pollTimer = new();
     private readonly DispatcherTimer clock = new()
     {
@@ -73,7 +64,6 @@ public sealed partial class PanelModel : Observable, IDisposable
     private DateTimeOffset lastQuota;
     private string page = "accounts", message = "", newName = "";
     private int newKind;
-    private bool allHistory;
     public string Page
     {
         get => page;
@@ -233,7 +223,7 @@ public sealed partial class PanelModel : Observable, IDisposable
         set
         {
             Store.Preferences.AutoQuota = value;
-            Store.Save();
+            Run(Store.Save);
             Changed();
         }
     }
@@ -248,18 +238,7 @@ public sealed partial class PanelModel : Observable, IDisposable
         }
     }
 
-    public bool HasPending => Handoffs.Pending != null;
-    public string PendingTitle => Handoffs.Pending?.Title ?? "";
-    public string PendingRoute => Handoffs.Pending is { } p ? AccountName(p.SourceId) + " → " + AccountName(p.TargetId) : "";
-    public bool HandoffBusy
-    {
-        get; private set;
-    }
-    public string ContinueLabel => HandoffBusy ? "准备中…" : "继续接力";
-    public string HistoryMore => allHistory ? "收起记录" : $"查看其余 {Math.Max(0, Handoffs.History.Count - 5)} 条";
-    public bool HasHistoryMore => Handoffs.History.Count > 5;
     public bool NoAccounts => Store.Accounts.Count == 0;
-    public string DataPath => Store.Handoffs;
     public Account? BusyAccount => Store.Accounts.FirstOrDefault(a => snapshots.TryGetValue(a.Id, out var s) && s.Sessions.Any(t => t.Status is "运行中" or "等待输入"));
     public Command Info
     {
@@ -297,30 +276,6 @@ public sealed partial class PanelModel : Observable, IDisposable
     {
         get;
     }
-    public Command RevealHandoffs
-    {
-        get;
-    }
-    public Command FinishHandoff
-    {
-        get;
-    }
-    public Command ExistingHandoff
-    {
-        get;
-    }
-    public Command CopyPrompt
-    {
-        get;
-    }
-    public Command CancelHandoff
-    {
-        get;
-    }
-    public Command MoreHistory
-    {
-        get;
-    }
     public Command DiscoverAgain
     {
         get;
@@ -338,7 +293,6 @@ public sealed partial class PanelModel : Observable, IDisposable
         InitializeDshEditor();
         Dsh = new DshService(store);
         Quotas = new QuotaService(Clients, Dsh);
-        Handoffs = new Handoffs(store);
         Info = new(() => Navigate("info"));
         Settings = new(() => Navigate("settings"));
         Add = new(() => { ResetDshEditor(); Navigate("add"); });
@@ -353,28 +307,6 @@ public sealed partial class PanelModel : Observable, IDisposable
         });
         ClearMessage = new(() => Message = "");
         RefreshAllCommand = new(() => Run(RefreshAll));
-        RevealHandoffs = new(() => Run(() =>
-        {
-            Store.PrivateDirectory(Store.Handoffs);
-            Reveal(Store.Handoffs);
-        }));
-        FinishHandoff = new(() => Run(() => Finish(false)), () => !HandoffBusy);
-        ExistingHandoff = new(() => Run(() => Finish(true)), () => !HandoffBusy);
-        CopyPrompt = new(() => Run(() =>
-        {
-            var p = Handoffs.Pending ?? throw new IOException("没有待继续的接力。");
-            ClipboardWriter.Set(Handoffs.Prompt(Handoffs.Draft(p)));
-        }));
-        CancelHandoff = new(() => Run(() =>
-        {
-            Handoffs.Clear();
-            UpdateHandoffs();
-        }));
-        MoreHistory = new(() =>
-        {
-            allHistory = !allHistory;
-            UpdateHandoffs();
-        });
         DiscoverAgain = new(() => Run(async () =>
         {
             await Clients.Discover();
@@ -392,8 +324,7 @@ public sealed partial class PanelModel : Observable, IDisposable
         if (Demo)
             PopulateDemo();
         MergeAccounts();
-        UpdateHandoffs();
-        if (Store.RecoveryDetail is { } recovery)
+        if (Store.TakeRecoveryDetail() is { } recovery)
             Notify(recovery);
     }
 
@@ -401,7 +332,7 @@ public sealed partial class PanelModel : Observable, IDisposable
     {
         if (Demo)
             return;
-        await Execute(async () =>
+        await Background(async () =>
         {
             await Clients.Discover();
             icons.Clear();
@@ -417,9 +348,10 @@ public sealed partial class PanelModel : Observable, IDisposable
     }
     public void Opened()
     {
+        Ready();
         if (Demo || !started || !AutoQuota)
             return;
-        Run(async () =>
+        _ = Background(async () =>
         {
             foreach (var account in Store.Accounts.ToArray())
                 await Refresh(account, false);
@@ -427,19 +359,41 @@ public sealed partial class PanelModel : Observable, IDisposable
     }
 
     public void SetVisible(bool panel, bool pet) => pollTimer.Interval = TimeSpan.FromSeconds(panel || pet ? 5 : 20);
-    private void Configure()
+    private void Configure() => Run(() =>
     {
         Store.Save();
         ConfigurationChanged?.Invoke();
-    }
+    });
 
     private void Navigate(string destination) => Page = Page == destination ? "accounts" : destination;
+    // Notices raised while the panel and tray are still being built (file recovery, hotkey) wait here,
+    // since nothing is subscribed yet and the message would clear before anyone saw it.
+    private List<string>? held = [];
+
     public void Notify(string value)
     {
+        if (held != null)
+        {
+            if (!held.Contains(value))
+                held.Add(value);
+            return;
+        }
+
         Message = value;
         messageTimer.Stop();
         messageTimer.Start();
         BackgroundError?.Invoke(value);
+    }
+
+    /// Shows the notices held during startup; called once the tray is listening or the panel first opens.
+    public void Ready()
+    {
+        if (held == null)
+            return;
+        var waiting = held;
+        held = null;
+        if (waiting.Count > 0)
+            Notify(string.Join("\n", waiting));
     }
 
     public void Run(Action action) => Run(() =>
@@ -450,7 +404,7 @@ public sealed partial class PanelModel : Observable, IDisposable
     public async void Run(Func<Task> action) => await Execute(action);
     private async Task Execute(Func<Task> action)
     {
-        Interacting = true;
+        interacting++;
         CommandManager.InvalidateRequerySuggested();
         try
         {
@@ -458,14 +412,29 @@ public sealed partial class PanelModel : Observable, IDisposable
         }
         catch (Exception e)
         {
-            Notify(e is IOException or InvalidOperationException ? e.Message : "操作失败，请稍后重试。");
+            Notify(Describe(e));
         }
         finally
         {
-            Interacting = false;
+            interacting--;
             CommandManager.InvalidateRequerySuggested();
         }
     }
+
+    // Polling and automatic quota refreshes report errors without holding the panel open.
+    private async Task Background(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception e)
+        {
+            Notify(Describe(e));
+        }
+    }
+
+    public static string Describe(Exception e) => e is IOException or InvalidOperationException or UnauthorizedAccessException ? e.Message : "操作失败，请稍后重试。";
 
     private async Task Poll()
     {
@@ -479,10 +448,11 @@ public sealed partial class PanelModel : Observable, IDisposable
             var reads = await Task.WhenAll(list.Select(async a => (a.Id, Snapshot: a.App == "dsh" ? await Dsh.Read(a) : await Task.Run(() => Sessions.Read(a, Clients)))));
             foreach (var (id, snapshot) in reads)
                 snapshots[id] = snapshot;
+            CheckChanges(list);
             MergeAccounts();
             ConfigurationChanged?.Invoke();
             if (AutoQuota && DateTimeOffset.UtcNow - lastQuota > TimeSpan.FromMinutes(5))
-                Run(RefreshAll);
+                _ = Background(RefreshAll);
         }
         catch
         {
@@ -553,12 +523,12 @@ public sealed partial class PanelModel : Observable, IDisposable
         {
             var app = client.App;
             var existing = Discovered.FirstOrDefault(d => d.App == app);
-            discoveries.Add(existing ?? new DiscoveredModel(app, "发现直接打开的 " + Label(app), Store.Accounts.Any(a => a.App == app), new(() => AddDefault(client)), new(() =>
+            discoveries.Add(existing ?? new DiscoveredModel(app, "发现直接打开的 " + Label(app), Store.Accounts.Any(a => a.App == app), new(() => Run(() => AddDefault(client))), new(() => Run(() =>
             {
                 Store.Preferences.DismissedDefaults.Add(app);
                 Store.Save();
                 MergeAccounts();
-            })));
+            }))));
         }
 
         if (Demo && discoveries.Count == 0)
@@ -646,223 +616,6 @@ public sealed partial class PanelModel : Observable, IDisposable
         return bitmap;
     }
 
-    public async Task OpenSession(Account account, Session session)
-    {
-        if (Demo)
-        {
-            Notify("演示模式，不打开客户端。");
-            return;
-        }
-
-        await OpenClient(account);
-        int count = Clients.Processes.Count(p => p.Executable.EndsWith("ChatGPT.exe", StringComparison.OrdinalIgnoreCase) && !Clients.Arguments(p.CommandLine).Any(a => a.StartsWith("--type", StringComparison.Ordinal) || a == "--crashpad-handler"));
-        if (SessionRouting.CanDeepLink(account.App, session.Id, count))
-            Process.Start(new ProcessStartInfo("codex://threads/" + session.Id) { UseShellExecute = true })?.Dispose();
-        RequestHide?.Invoke();
-    }
-
-    private async Task CreateAccount()
-    {
-        if (Demo)
-        {
-            Notify("演示模式，不创建真实账号。");
-            return;
-        }
-
-        if (NewDsh)
-        {
-            await CreateDsh();
-            return;
-        }
-        var account = Store.Create(NewName, NewKind == 0 ? "codex" : "claude");
-        NewName = "";
-        Page = "accounts";
-        MergeAccounts();
-        await Clients.Open(account);
-    }
-
-    private Task ImportAccount()
-    {
-        var folder = new OpenFolderDialog
-        {
-            Title = "选择客户端数据目录"
-        };
-        if (folder.ShowDialog() != true)
-            return Task.CompletedTask;
-        var app = NewKind == 0 ? "codex" : "claude";
-        if (Store.Accounts.Any(a => a.App == app && Store.SamePath(a.ProfilePath, folder.FolderName)))
-            throw new IOException("这个目录已被其他账号引用。");
-        var client = Clients.Installed.FirstOrDefault(c => c.App == app);
-        bool isDefault = client != null && Store.SamePath(client.DefaultProfile, folder.FolderName);
-        Store.Add(new Account { Name = string.IsNullOrWhiteSpace(NewName) ? Label(app) + " 账号" : NewName.Trim(), App = app, ProfilePath = folder.FolderName, SessionRoot = isDefault ? client!.DefaultSessions : app == "codex" ? Path.Combine(folder.FolderName, "codex-home") : folder.FolderName, Default = isDefault, ThirdParty = !isDefault && app == "claude" && ThirdParty });
-        Page = "accounts";
-        MergeAccounts();
-        return Task.CompletedTask;
-    }
-
-    public Task Relocate(Account account)
-    {
-        if (account.App == "dsh")
-        {
-            ConfigureDsh(account);
-            return Task.CompletedTask;
-        }
-        var folder = new OpenFolderDialog
-        {
-            Title = "重新定位账号数据目录"
-        };
-        if (folder.ShowDialog() != true)
-            return Task.CompletedTask;
-        if (Store.Accounts.Any(a => a.Id != account.Id && a.App == account.App && Store.SamePath(a.ProfilePath, folder.FolderName)))
-            throw new IOException("这个目录已被其他账号引用。");
-        account.ProfilePath = folder.FolderName;
-        var client = Clients.Installed.FirstOrDefault(c => c.App == account.App);
-        account.Default = client != null && Store.SamePath(client.DefaultProfile, folder.FolderName);
-        if (account.Default)
-            account.ThirdParty = false;
-        account.SessionRoot = account.Default ? client!.DefaultSessions : account.App == "codex" ? Path.Combine(folder.FolderName, "codex-home") : folder.FolderName;
-        Store.Save();
-        Quotas.Clear(account.Id);
-        snapshots.Remove(account.Id);
-        MergeAccounts();
-        return Task.CompletedTask;
-    }
-
-    public void Rename(Account account)
-    {
-        var name = Prompt?.Invoke("账号名称", account.Name);
-        if (string.IsNullOrWhiteSpace(name))
-            return;
-        account.Name = name.Trim();
-        Store.Save();
-        MergeAccounts();
-    }
-
-    public void Remove(Account account)
-    {
-        if (Handoffs.Pending is { } pending && (pending.SourceId == account.Id || pending.TargetId == account.Id))
-            throw new IOException("请先完成或取消这个账号的待接力任务。");
-        var choice = ConfirmDelete?.Invoke(account) ?? (false, false);
-        if (!choice.Item1)
-            return;
-        if (choice.Item2 && account.App != "dsh" && !account.Default && Directory.Exists(account.ProfilePath))
-        {
-            if (Store.SamePath(account.ProfilePath, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)) || Store.SamePath(account.ProfilePath, Store.Root))
-                throw new IOException("不能回收用户目录或 Perch 数据根目录。");
-            FileSystem.DeleteDirectory(account.ProfilePath, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
-        }
-
-        Store.Remove(account);
-        Quotas.Clear(account.Id);
-        snapshots.Remove(account.Id);
-        MergeAccounts();
-    }
-
-    public void SwitchDefault(Account account, Client client)
-    {
-        if (Store.Accounts.Any(a => a.Id != account.Id && a.App == client.App && a.Default))
-            throw new IOException("默认数据已被另一个账号引用。");
-        if (Confirm?.Invoke("改用直接打开的 " + Label(client.App) + " 数据？原目录将保留。") != true)
-            return;
-        account.ProfilePath = client.DefaultProfile;
-        account.SessionRoot = client.DefaultSessions;
-        account.Default = true;
-        account.ThirdParty = false;
-        Store.Save();
-        Quotas.Clear(account.Id);
-        snapshots.Remove(account.Id);
-        MergeAccounts();
-    }
-
-    private void AddDefault(Client client)
-    {
-        Store.Add(new Account { App = client.App, Name = Label(client.App) + " 默认账号", ProfilePath = client.DefaultProfile, SessionRoot = client.DefaultSessions, Default = true });
-        MergeAccounts();
-        if (AutoQuota)
-            Run(RefreshAll);
-    }
-
-    public async Task BeginHandoff(Account source, Account target, Session session)
-    {
-        if (source.App == "dsh" && !Demo)
-        {
-            snapshots[source.Id] = await Dsh.Read(source);
-            MergeAccounts();
-            if (!CanHandoff(source, session)) throw new IOException("请先连接 dsh 并停下任务，再开始接力。");
-        }
-        var pending = Handoffs.Prepare(source, target, session);
-        try
-        {
-            ClipboardWriter.Set(Handoffs.Prompt(Handoffs.Draft(pending)));
-        }
-        finally
-        {
-            UpdateHandoffs();
-        }
-
-        if (!Demo)
-        {
-            await OpenClient(source);
-            RequestHide?.Invoke();
-        }
-    }
-
-    private async Task Finish(bool choose)
-    {
-        string? path = null;
-        if (choose)
-        {
-            var picker = new OpenFileDialog
-            {
-                Filter = "Markdown|*.md",
-                CheckFileExists = true
-            };
-            if (picker.ShowDialog() != true)
-                return;
-            path = picker.FileName;
-        }
-
-        var pending = Handoffs.Pending ?? throw new IOException("没有待继续的接力。");
-        var target = Store.Accounts.FirstOrDefault(a => a.Id == pending.TargetId) ?? throw new IOException("目标账号已移除。");
-        HandoffBusy = true;
-        Changed(nameof(HandoffBusy));
-        Changed(nameof(ContinueLabel));
-        try
-        {
-            if (!Demo && target.App == "dsh")
-                await Dsh.Ensure(target);
-            Handoffs.Transfer(ClipboardWriter.Set, path);
-            UpdateHandoffs();
-            if (!Demo)
-                await OpenClient(target);
-            Notify("接力文档已复制，请在目标新对话粘贴发送。");
-        }
-        finally
-        {
-            HandoffBusy = false;
-            Changed(nameof(HandoffBusy));
-            Changed(nameof(ContinueLabel));
-        }
-    }
-
-    private string AccountName(string id) => Store.Accounts.FirstOrDefault(a => a.Id == id)?.Name ?? "已移除账号";
-    public void UpdateHandoffs()
-    {
-        Changed(nameof(HasPending));
-        Changed(nameof(PendingTitle));
-        Changed(nameof(PendingRoute));
-        Changed(nameof(HistoryMore));
-        Changed(nameof(HasHistoryMore));
-        var records = Handoffs.History.Take(allHistory ? int.MaxValue : 5).Select(r => History.FirstOrDefault(h => h.Id == r.Id) ?? new HistoryModel(r.Id, $"{r.Created.LocalDateTime:MM-dd HH:mm} {r.SourceName} → {r.TargetName}", r.Title, r.Path, new(() => Run(() => Reveal(r.Path))), new(() =>
-        {
-            Handoffs.Forget(r.Id);
-            UpdateHandoffs();
-        })));
-        Merge(History, records);
-        if (Handoffs.RecoveryDetail is { } recovery)
-            Notify(recovery);
-    }
-
     public static string Label(string app) => ClientKinds.Label(app);
     public static void Reveal(string path)
     {
@@ -872,60 +625,6 @@ public sealed partial class PanelModel : Observable, IDisposable
         };
         info.ArgumentList.Add(File.Exists(path) ? "/select," + path : path);
         Process.Start(info)?.Dispose();
-    }
-
-    private void PopulateDemo()
-    {
-        foreach (var (app, name, missing) in new[]
-        {
-            ("codex", "Omnix 工作", false),
-            ("codex", "个人项目", true),
-            ("claude", "Claude 研究", false),
-            ("dsh", "dsh 工作", false)
-        }
-
-        )
-        {
-            var path = Path.Combine(Store.Root, name);
-            if (!missing)
-                Directory.CreateDirectory(path);
-            var a = new Account
-            {
-                App = app,
-                Name = name,
-                ProfilePath = path,
-                SessionRoot = path
-            };
-            Store.Add(a);
-            var now = DateTimeOffset.UtcNow;
-            var list = new List<Session>
-            {
-                new(Guid.NewGuid().ToString(), "完善 Windows 端原生体验", "运行中", now.AddMinutes(-2)),
-                new(Guid.NewGuid().ToString(), "确认交互与验收结果", "等待输入", now.AddMinutes(-5)),
-                new(Guid.NewGuid().ToString(), "整理账号隔离方案", "已完成", now.AddMinutes(-22)),
-                new(Guid.NewGuid().ToString(), "检查网络请求", "遇到问题", now.AddHours(-1)),
-                new(Guid.NewGuid().ToString(), "同步项目进度", "已完成", now.AddHours(-3)),
-                new(Guid.NewGuid().ToString(), "验证测试样本", "已完成", now.AddDays(-1))
-            };
-            snapshots[a.Id] = new Snapshot(!missing, list, "", 1);
-            demoQuotas[a.Id] = new Quota([new("5h", app == "codex" ? 72 : 92, now.AddHours(3)), new("周", 36, now.AddDays(4))], now.AddMinutes(-8), missing ? "网络暂不可用" : "", missing);
-            if (app == "dsh")
-            {
-                a.Dsh = new DshConfiguration();
-                snapshots[a.Id] = new(true, [new("demo-dsh-live", "查看 DeepSeek Harness 适配", "运行中", now.AddMinutes(-2)), new("demo-dsh-idle", "准备 Markdown 交接", "已完成", now.AddMinutes(-10)), new("demo-dsh-cold", "检查历史工作", "已完成", now.AddHours(-1))], "dsh 本机 Web", 0, now);
-                demoQuotas[a.Id] = new([], now, "默认模型：DeepSeek API Key 已配置\n官方账户已登录 · 官方钱包与 API 余额独立查询", Balances: [new("充值", "CNY", 32.58m), new("赠送", "CNY", 5.25m)],
-                    ApiBalance: new([new("总额", "CNY", 19.23456789m), new("充值", "CNY", 18m), new("赠送", "CNY", 1.23456789m)], now, "查询成功（演示）"));
-            }
-        }
-
-        var source = Store.Accounts[0];
-        var target = Store.Accounts[2];
-        Handoffs.Prepare(source, target, new Session("demo", "把实现与验证交给下一位 agent", "已完成", DateTimeOffset.UtcNow));
-        var history = Enumerable.Range(0, 7).Select(i => new HandoffRecord("demo-" + i, source.Id, target.Id, "交接文档已保存", Path.Combine(Store.Root, "demo.md"), DateTimeOffset.UtcNow.AddHours(-i), source.Name, target.Name)).ToList();
-        Store.Write("handoffs/history.json", history);
-        Store.Preferences.MediaEnabled = false;
-        Store.Preferences.PetEnabled = true;
-        Store.Preferences.PetVisible = true;
     }
 
     public void Dispose()

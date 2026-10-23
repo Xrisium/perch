@@ -216,13 +216,13 @@ public sealed class AccountModel : Observable
         Value = account;
         Open = new Command(() => owner.Run(() => owner.Demo ? DemoOpen() : Missing ? owner.Relocate(Value) : Value.App == "dsh" && Value.Dsh?.Mode == "external" && !Running ? owner.ReconnectDsh(Value) : owner.OpenClient(Value)));
         Refresh = new Command(() => owner.Run(() => owner.Refresh(Value)), () => !Busy && !Missing);
-        More = new Command(() =>
+        More = new Command(() => owner.Run(() =>
         {
             if (!owner.Store.Preferences.ExpandedAccounts.Remove(Value.Id))
                 owner.Store.Preferences.ExpandedAccounts.Add(Value.Id);
             owner.Store.Save();
             owner.MergeAccounts();
-        });
+        }));
     }
 
     private System.Threading.Tasks.Task DemoOpen()
@@ -319,13 +319,13 @@ public sealed class GroupModel : Observable
     {
         Owner = owner;
         App = app;
-        Toggle = new Command(() =>
+        Toggle = new Command(() => owner.Run(() =>
         {
             if (!owner.Store.Preferences.Collapsed.Remove(App))
                 owner.Store.Preferences.Collapsed.Add(App);
             owner.Store.Save();
             Notify();
-        });
+        }));
     }
 
     public void Notify()
@@ -336,5 +336,4 @@ public sealed class GroupModel : Observable
     }
 }
 
-public sealed record HistoryModel(string Id, string Label, string Title, string Path, Command Open, Command Forget);
 public sealed record DiscoveredModel(string App, string Label, bool HasAccounts, Command Add, Command Dismiss);

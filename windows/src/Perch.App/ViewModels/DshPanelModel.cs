@@ -150,7 +150,4 @@ public sealed partial class PanelModel
         MergeAccounts();
     }
 
-    public bool CanHandoff(Account account, Session session) => account.App == "dsh" && !Demo
-        ? DshService.CanHandoff(snapshots.GetValueOrDefault(account.Id), session.Id)
-        : session.Status is not ("运行中" or "等待输入");
 }

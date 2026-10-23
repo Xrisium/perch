@@ -28,6 +28,23 @@ public struct Launcher {
     }
 
     public func launch(_ account: Account) -> LaunchOutcome {
+        if let local = account.localProvider {
+            do {
+                if local.kind == .application, let running = processes(),
+                   let owner = LocalProviderLauncher.applicationProcess(account, processes: running), activate(owner.pid) {
+                    return .activated(pid: owner.pid)
+                }
+                // There is no editor for the launch location; a moved client is found again by scanning.
+                do { try local.validate() } catch {
+                    return .failed(error.localizedDescription + "。如果客户端换了位置，在新建页点“自动获取可用供应商”后选“更新启动位置”，或删除后重新扫描添加。")
+                }
+                if local.kind == .terminal, let running = processes(), LocalProviderLauncher.isRunning(account, processes: running) {
+                    try run(LaunchCommand(arguments: ["-a", "Terminal"]))
+                } else { try run(LocalProviderLauncher.command(for: account)) }
+                return .launched
+            } catch { return .failed(error.localizedDescription) }
+        }
+        guard AppKind.desktopClients.contains(account.app) else { return .failed("缺少供应商配置") }
         guard let running = processes() else { return .failed("无法确认客户端是否在运行，已取消启动") }
         if let owner = ProcessMatcher.owner(of: account.profilePath, in: running) {
             return activate(owner.pid) ? .activated(pid: owner.pid) : .failed("客户端在运行，但没能调到前台")

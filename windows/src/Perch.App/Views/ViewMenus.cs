@@ -60,33 +60,10 @@ public static class ViewMenus
         var model = session.Account.Owner;
         var menu = new ContextMenu();
         menu.Items.Add(Item("打开", () => session.Open.Execute(null)));
-        var handoff = new MenuItem
-        {
-            Header = "接力到…",
-            IsEnabled = model.CanHandoff(session.Account.Value, session.Value)
-        };
-        foreach (var target in model.Store.Accounts.Where(a => a.Id != session.Account.Value.Id))
-            handoff.Items.Add(Item(target.Name + "（" + PanelModel.Label(target.App) + "）", () => model.Run(() => model.BeginHandoff(session.Account.Value, target, session.Value))));
-        menu.Items.Add(handoff);
-        if (session.Value.Path.Length > 0)
-        {
-            menu.Items.Add(new Separator());
-            menu.Items.Add(Item("复制会话文件路径", () => model.Run(() => ClipboardWriter.Set(session.Value.Path))));
-            menu.Items.Add(Item("在资源管理器中显示", () => model.Run(() => PanelModel.Reveal(session.Value.Path)), File.Exists(session.Value.Path)));
-        }
-        Show(owner, menu);
-    }
-
-    public static void Pending(Button button)
-    {
-        if (button.DataContext is not PanelModel model)
-            return;
-        var menu = new ContextMenu();
-        menu.Items.Add(Item("使用已有文档…", () => model.ExistingHandoff.Execute(null)));
-        menu.Items.Add(Item("打开交接文件夹", () => model.RevealHandoffs.Execute(null)));
         menu.Items.Add(new Separator());
-        menu.Items.Add(Item("取消接力", () => model.CancelHandoff.Execute(null)));
-        Show(button, menu);
+        menu.Items.Add(Item("复制会话文件路径", () => model.Run(() => ClipboardWriter.Set(session.Value.Path)), session.Value.Path.Length > 0));
+        menu.Items.Add(Item("在资源管理器中显示", () => model.Run(() => PanelModel.Reveal(session.Value.Path)), File.Exists(session.Value.Path)));
+        Show(owner, menu);
     }
 
     public static void Discovered(Button button)

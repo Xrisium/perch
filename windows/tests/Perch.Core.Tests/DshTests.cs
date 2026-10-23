@@ -64,9 +64,6 @@ internal static class DshTests
         var manyPlaceholders = JsonSerializer.SerializeToElement(new { items = Enumerable.Range(0, 45).Select(i => new { sessionId = "placeholder-" + i, updatedAt = 1791552300000L + i, blank = true, running = false })
             .Cast<object>().Append(new { sessionId = "real", updatedAt = 1791552000000L, blank = false, running = false, projections = new { values = new { title = "Older real conversation" } } }) });
         Check(DshConnection.ParseSessions(manyPlaceholders).Single().Title == "Older real conversation", "Blank filtering must happen before the 40-session limit");
-        var snapshot = new Snapshot(true, sessions, "", 0, DateTimeOffset.UtcNow);
-        Check(DshService.CanHandoff(snapshot, "idle") && !DshService.CanHandoff(snapshot, "active") && !DshService.CanHandoff(snapshot, "unknown"), "Only confirmed idle dsh sessions can hand off");
-        Check(!DshService.CanHandoff(snapshot with { Cached = true }, "idle") && !DshService.CanHandoff(snapshot with { Observed = DateTimeOffset.UtcNow.AddMinutes(-2) }, "idle"), "Cached and stale summaries must block handoff");
         using var wallet = JsonDocument.Parse("""{"status":"ready","value":[{"currency":"CNY","balance":"12.34567890123456789"},{"currency":"USD","balance":"0"}],"bonusWallets":[{"currency":"CNY","balance":"1.20"}]}""");
         var balances = DshConnection.ParseBalance(wallet.RootElement);
         Check(balances.Count == 3 && balances[0].Amount == 12.34567890123456789m && balances[1].Currency == "USD" && balances[2].Kind == "赠送", "Wallets preserve decimal precision, currency and kind");
@@ -103,8 +100,6 @@ internal static class DshTests
         handler.PageUnavailable = true;
         Check((await connection.Sessions()).Single().Status == "空闲", "History failure must clear a previous green check and preserve live metadata");
         handler.PageUnavailable = false;
-        var completedSnapshot = snapshot with { Sessions = [new("done", "Completed", "已完成", DateTimeOffset.UtcNow)] };
-        Check(DshService.CanHandoff(completedSnapshot, "done"), "Completed dsh sessions remain eligible for document handoff");
         using var newTurn = JsonDocument.Parse("""{"records":[{"type":"event","event":{"type":"turn/end","data":{"reason":{"kind":"completed"}}}},{"type":"event","event":{"type":"turn/start","data":{"turn":2}}}]}""");
         Check(DshConnection.CompletionStatus(newTurn.RootElement) == "已停止", "An unfinished latest turn must not inherit an earlier completion");
         Check((await connection.Balance()).Balances!.Single().Amount == 7.25m && handler.SawClient, "Official balance RPC includes UI metadata");
@@ -167,7 +162,7 @@ internal static class DshTests
         var npmAccount = new Account { App = "dsh", Name = "npm dsh", ProfilePath = Path.Combine(root, "npm home"), SessionRoot = Path.Combine(root, "npm home"), Dsh = new() { InstallationPath = project, NodePath = node } };
         Check(DshInstallation.Resolve(npmAccount).Entry == Path.Combine(npm, "bin.js"), "Local npm installation resolves the manifest bin");
         await Lifecycle(store, account, npmAccount);
-        Console.WriteLine("PASS: dsh install resolution, RPC/auth, wallet precision, cache, handoff and independent host lifecycle");
+        Console.WriteLine("PASS: dsh install resolution, RPC/auth, wallet precision, cache and independent host lifecycle");
     }
 
     private static async Task Lifecycle(Store store, Account source, Account npm)
@@ -208,15 +203,8 @@ internal static class DshTests
             Check(DshState.ChildAlive(before) && !(await service.Read(external)).Running, "External disconnect must not terminate the owner's runtime");
             store.Remove(source);
             Check(DshState.ChildAlive(before), "Account removal must leave running service intact");
-            var handoffs = new Handoffs(store);
             var read = await service.Read(source);
-            var task = read.Sessions.Single();
-            Check(DshService.CanHandoff(read, task.Id), "Fresh idle service summary permits document handoff");
-            var pending = handoffs.Prepare(source, npm, task);
-            File.WriteAllText(handoffs.Draft(pending), "# User supplied handoff\nContinue the isolated test.");
-            string copied = "";
-            handoffs.Transfer(value => copied = value);
-            Check(copied.Contains("Continue the isolated test") && handoffs.Pending == null, "dsh uses the existing document transaction without sending a prompt");
+            Check(read.Running && !read.Cached && read.Sessions.Single().Status == "空闲", "Fresh service summaries remain available after account removal");
             var npmRuntime = service.State(npm).Read()!;
             using (var host = Process.GetProcessById(npmRuntime.HostPid)) { host.Kill(); await host.WaitForExitAsync(); }
             Check((await service.Read(npm)).Detail.Contains("宿主已退出") && DshState.ChildAlive(npmRuntime), "Host crash must report the still-running child accurately");
@@ -224,7 +212,7 @@ internal static class DshTests
             Check(service.State(npm).Read()!.ChildPid == npmRuntime.ChildPid, "Host loss must not duplicate a surviving runtime");
             using (var child = Process.GetProcessById(before.ChildPid)) { child.Kill(true); await child.WaitForExitAsync(); }
             var offline = await service.Read(source);
-            Check(offline.Cached && !offline.Running && offline.Sessions.Single().Status == "状态未知" && !DshService.CanHandoff(offline, task.Id), "Crashed runtime preserves cached metadata and blocks handoff");
+            Check(offline.Cached && !offline.Running && offline.Sessions.Single().Status == "状态未知", "Crashed runtime preserves cached metadata without reporting completion");
         }
         finally
         {

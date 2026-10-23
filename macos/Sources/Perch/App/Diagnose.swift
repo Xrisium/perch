@@ -35,7 +35,7 @@ enum Diagnose {
                 case .success(let value): line += " quotaLive=\(summary(value))"
                 case .failure(let failure): line += " quotaLive=失败(\(failure.reason))"
                 }
-            } else {
+            } else if account.app == .claude {
                 let sessions = ClaudeDesktopSessionReader(profileRoot: URL(fileURLWithPath: account.profilePath)).recent(appRunning: running)
                 let states = Dictionary(grouping: sessions, by: { $0.status.rawValue }).mapValues(\.count)
                 line += " sessions=\(sessions.count) states=\(states)"
@@ -43,15 +43,23 @@ enum Diagnose {
                     line += " quotaCached=\(summary(.windows(cache.windows))) observed=\(QuotaFormat.resetTimestamp(cache.observedAt))"
                 }
                 switch ClaudeQuota.live(dataDir: URL(fileURLWithPath: account.profilePath)) {
-                case .success(let value): line += " quotaLive=\(summary(value))"
+                case .success(let answer): line += " quotaLive=\(summary(answer.value))"
                 case .failure(let failure): line += " quotaLive=失败(\(failure.reason))"
                 }
             }
-            print(HandoffDocument.redactingEmails(line))
+            if account.localProvider != nil {
+                line += " localSessions=\(LocalProviderSessions.recent(account).count) quota=unsupported"
+            }
+            print(redactingEmails(line))
         }
         let media = MediaMonitor()
         media.poll { value in print("mediaPlaying=\(value.playing) kind=\(value.kind.rawValue) source=\(value.source)") }
         PerchNotifications.shared.diagnose()
         withExtendedLifetime(media) { RunLoop.current.run(until: Date().addingTimeInterval(3)) }
+    }
+
+    private static func redactingEmails(_ text: String) -> String {
+        text.replacingOccurrences(of: #"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"#,
+                                  with: "[邮箱已隐藏]", options: .regularExpression)
     }
 }

@@ -1,6 +1,6 @@
 # Perch
 
-**在 macOS 菜单栏或 Windows 系统托盘里，管理多个 Codex / Claude 桌面客户端账号：一眼看到任务和额度，额度用完时把任务接力到另一个账号。**
+**在 macOS 菜单栏或 Windows 系统托盘里，管理多个 Codex / Claude 桌面客户端账号：一眼看到任务和额度，对话完成或等你回应时收到通知。**
 
 [下载](#下载与安装) · [快速上手](#快速上手) · [更新记录](CHANGELOG.md) · [从源码构建](#从源码构建)
 
@@ -21,24 +21,15 @@
 | --- | --- | --- |
 | 按 Codex / Claude 分组，一键启动或调出对应账号的客户端，每个账号的登录和数据互不干扰。 | 查看正在运行的任务和最近的会话；分组、账号和会话都能拖动排序。 | 显示 5 小时和每周额度的已用比例与重置时间，可手动刷新或定期同步；查不到时显示上次的数据并注明时间。 |
 
+**macOS 开发版新增供应商管理**：可引用本机 Gemini CLI、Antigravity CLI、DeepSeek Harness 和 Gemini 应用。Antigravity 额度来自 Gemini 应用内的 Antigravity；Antigravity CLI 卡片只在手动刷新时运行一次 agy。DeepSeek 显示账户余额。通过新建页主动扫描、逐项添加本机入口。之前开发版里的自定义客户端和 API 供应商已删除，旧账号会移到备份文件。使用方式见[供应商说明](docs/macos/providers.md)。此功能尚未发布到上表的 Release，Windows 暂未跟进。
+
 **桌宠（可选）**：默认关闭。在设置里开启后，可以选一个静态的原生浮球，或者内置角色 Pox（带配套面板主题）。单击桌宠打开面板，拖动可换位置。
-
-## 换账号，继续同一个任务
-
-![文档接力示意：在源对话生成交接文档，复制到目标新对话继续](docs/images/handoff-flow.png)
-
-1. 右键一个已停下的会话，选择“接力到…”和目标账号。
-2. Perch 复制一段提示词并调出原来的客户端；在原对话里粘贴发送，AI 会把交接文档写到指定位置。
-3. 文档写好后，回到面板点“继续接力”，Perch 复制文档内容并调出目标客户端。
-4. 在目标账号里新建对话，粘贴发送，任务就接着做下去。
-
-也可以直接用已有的 Markdown 文档接力。未完成的接力在重启后还在；面板会保留最近的接力记录。**Perch 不会替你发送任何消息。**
 
 ## 下载与安装
 
 两个平台的安装包目前都没有经过系统签名认证，第一次打开时系统会拦一下，按下面的步骤放行即可。只在确认是从本仓库 Releases 页面下载时才这样做。
 
-Windows 源码当前还支持 DeepSeek Harness（dsh）Web：源码构建版、npm 安装版和已有本机实例，包含任务、官方账户钱包与文档接力。此能力尚未发布到上面的 0.2.0 安装包；配置与限制见 [Windows dsh 指南](docs/windows/deepseek-harness.md)。
+Windows 源码当前还支持 DeepSeek Harness（dsh）Web：源码构建版、npm 安装版和已有本机实例，包含任务、官方账户钱包与独立 API 余额查询。此能力尚未发布到上面的 0.2.0 安装包；配置与限制见 [Windows dsh 指南](docs/windows/deepseek-harness.md)。
 
 ### macOS
 
@@ -58,12 +49,12 @@ Windows 源码当前还支持 DeepSeek Harness（dsh）Web：源码构建版、n
 
 ### 卸载
 
-退出 Perch，删除应用（macOS 删除 Perch.app；Windows 删除解压的文件夹）。如果也不想保留 Perch 的设置和接力文档，再删除下表里“Perch 设置与接力文档”那一行的目录。Codex / Claude 客户端自己的数据不受影响。
+退出 Perch，删除应用（macOS 删除 Perch.app；Windows 删除解压的文件夹）。如果也不想保留 Perch 的设置，再删除下表里“Perch 设置”那一行的目录。Codex / Claude 客户端自己的数据不受影响。
 
 ## 快速上手
 
 1. 打开 Perch：macOS 点菜单栏图标；Windows 点托盘图标或按 `Ctrl+Alt+P`。
-2. 点“新建账号”，选择 Codex 或 Claude，Perch 会启动一个独立的客户端，在里面登录即可。已经在用的客户端会被自动发现。
+2. 点“新建账号”，选择 Codex 或 Claude，Perch 会启动一个独立的客户端，在里面登录即可。点击“自动获取可用供应商”可扫描已有客户端，再选择要添加的账号。
 3. 在面板里查看任务和额度；账号旁的刷新按钮可以立刻同步额度。
 4. 想要桌面入口，就在设置里开启桌宠。
 
@@ -77,7 +68,7 @@ Windows 源码当前还支持 DeepSeek Harness（dsh）Web：源码构建版、n
 - **额度**：需要客户端处于登录状态，并依赖官方服务；查询失败时显示上次的数据和查询时间（不是重置时间），悬停可看原因。用 API Key 或第三方服务登录的账号没有订阅额度，会显示“不限”，这不代表对方服务没有限制。
 - **排序**：会话顺序只保存在 Perch 里，不改动客户端的会话记录。
 - **桌宠的媒体感知**（macOS）：只读取“是否在播放、是什么类型”，不读取歌名等内容。
-- 同时登录两个个人账号、完整的跨账号接力等场景仍在实测中，详见 [macOS 验收](docs/macos/acceptance.md)、[Windows 验收](docs/windows/acceptance.md) 和 [功能对齐表](shared/parity.md)。
+- 同时登录两个个人账号等场景仍在实测中，详见 [macOS 验收](docs/macos/acceptance.md)、[Windows 验收](docs/windows/acceptance.md) 和 [功能对齐表](shared/parity.md)。
 
 </details>
 
@@ -85,14 +76,14 @@ Windows 源码当前还支持 DeepSeek Harness（dsh）Web：源码构建版、n
 
 | 内容 | macOS | Windows |
 | --- | --- | --- |
-| Perch 设置与接力文档 | `~/Library/Application Support/Perch/` | `%LOCALAPPDATA%\Perch\` |
+| Perch 设置 | `~/Library/Application Support/Perch/` | `%LOCALAPPDATA%\Perch\` |
 | 在 Perch 里新建的客户端数据 | 上述目录下的 `Profiles/` | `%USERPROFILE%\.perch\profiles\` |
 
 - 已有的客户端数据原地使用，Perch 不会移动或删除；从旧版 agent-desk 导入账号也不会删除它的数据。
-- 平时只读取会话的标题、状态和工作目录，不读取聊天内容。接力只处理你指定的那份 Markdown 文档。
-- Codex／Claude 查询额度时，Perch 会读取对应账号在客户端里的登录授权，只在内存中用于向官方服务查询额度，不保存到文件或日志，也不会改变客户端的登录状态。Windows dsh 通过本机服务查询会话和钱包，其本地连接授权使用当前用户 DPAPI 加密保存以支持恢复连接，不读取浏览器或 dsh 凭据文件。
+- 平时只读取会话的标题、状态和工作目录，不读取聊天内容。
+- Codex／Claude 查询额度时，Perch 会读取对应账号在客户端里的登录授权，只在内存中用于向官方服务查询额度，不保存到文件或日志，也不会改变客户端的登录状态。Windows dsh 通过本机服务查询会话和钱包，其本地连接授权使用当前用户 DPAPI 加密保存以支持恢复连接，不读取浏览器登录信息；独立 API 余额查询只读指定 dsh 数据目录的标准文件凭据，仅在内存中向官方 HTTPS 接口使用 Key，不保存密钥副本。
 - Perch 不会自动发送任何聊天消息，不上传你的数据，没有跨设备同步。
-- 接力文档等数据目录只有当前用户可以访问。
+- Perch 的数据目录只有当前用户可以访问。
 
 ## 从源码构建
 

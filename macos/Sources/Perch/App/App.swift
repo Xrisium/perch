@@ -60,7 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let hosting = FirstMouseHostingController(rootView: PerchPanel(perch: perch, pet: pet))
         hosting.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hosting
-        PerchNotifications.shared.configure { [weak self] in self?.showPanel() }
+        PerchNotifications.shared.configure(openPanel: { [weak self] in self?.showPanel() },
+                                            perform: { [weak self] in self?.perch.perform($0) ?? false })
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = MenuBarIcon.make()
@@ -177,6 +178,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) { focusPopover() }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Finder/Dock reopening must expose the accessory app's panel even without a pet window.
+        showPanel()
+        return false
+    }
+
     private func focusPopover() {
         guard popover.isShown else { return }
         guard let window = popover.contentViewController?.view.window else { return }
@@ -234,6 +241,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 enum PerchMain {
     static func main() {
         PreferenceMigration.run(from: UserDefaults(suiteName: PreferenceMigration.legacyDomain), to: .standard)
+        if CommandLine.arguments.contains("--diagnose-providers") || CommandLine.arguments.contains("--import-local-providers") {
+            do { try ProviderDiagnostics.run(importLocal: CommandLine.arguments.contains("--import-local-providers")) }
+            catch { fputs("Provider operation failed: \(error.localizedDescription)\n", stderr); exit(1) }
+            return
+        }
         if CommandLine.arguments.contains("--diagnose") { Diagnose.run(); return }
         let app = NSApplication.shared
         let delegate = AppDelegate()
